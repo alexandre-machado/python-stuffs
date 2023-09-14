@@ -33,7 +33,7 @@ def task(arg):
 
 def main():
     # entry point for the program
-    items = ipaddress.IPv4Network("192.168.0.0/22")
+    items = ipaddress.IPv4Network("192.168.0.0/24")
     print(
         f"my ip: {socket.gethostbyname(socket.gethostname())} itens: {items.num_addresses}"
     )
@@ -45,7 +45,7 @@ def main():
         result_list.append(result)
 
     print("found ips:")
-    print([x for x in result_list if re.match(".*online.*", x)])
+    print([x for x in result_list if "online" in x])
 
     # print(result_list.index("192.168.0.228: ⛔ offline"))
     # pool.imap(task, items)

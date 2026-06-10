@@ -35,6 +35,25 @@ sed -i "s|{{DESC}}|$desc|g" "$dest/pyproject.toml" "$dest/README.md"
 # Cria o ambiente isolado (.venv) e instala as dependências (vazias por enquanto).
 ( cd "$dest" && uv sync )
 
+# Registra a nova POC no workspace do VS Code (cada pasta usa seu próprio .venv).
+ws="python-stuffs.code-workspace"
+if [ -f "$ws" ]; then
+    python3 - "$ws" "$dest" <<'PY'
+import json, sys
+
+ws_path, folder = sys.argv[1], sys.argv[2]
+with open(ws_path) as f:
+    data = json.load(f)
+folders = data.setdefault("folders", [])
+if not any(item.get("path") == folder for item in folders):
+    folders.append({"path": folder})
+with open(ws_path, "w") as f:
+    json.dump(data, f, indent=4, ensure_ascii=False)
+    f.write("\n")
+PY
+    echo "   registrada no workspace: $ws"
+fi
+
 echo
 echo "✅ POC criada em $dest"
 echo "   cd $dest && uv run main.py"

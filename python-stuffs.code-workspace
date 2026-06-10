@@ -1,0 +1,24 @@
+{
+    "folders": [
+        { "name": "📦 python-stuffs", "path": "." },
+        { "path": "projects/asciichart-demo" },
+        { "path": "projects/multiprocessing-examples" },
+        { "path": "projects/network-scanner" },
+        { "path": "projects/3d-mesh-beliche" }
+    ],
+    "settings": {
+        "[python]": {
+            "editor.defaultFormatter": "ms-python.black-formatter"
+        },
+        "python.testing.pytestEnabled": true,
+        "python.testing.unittestEnabled": false,
+        "python.testing.pytestArgs": ["tests"],
+        "python.analysis.typeCheckingMode": "basic"
+    },
+    "extensions": {
+        "recommendations": [
+            "ms-python.python",
+            "ms-python.black-formatter"
+        ]
+    }
+}

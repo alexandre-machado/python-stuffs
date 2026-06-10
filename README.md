@@ -34,6 +34,22 @@ uv add requests       # adiciona uma dependência
 uv run pytest         # roda os testes
 ```
 
+## VS Code
+
+Abra o **workspace** (não a pasta raiz nem cada projeto individualmente):
+
+```bash
+code python-stuffs.code-workspace
+```
+
+Você vê o repo inteiro numa janela só, mas cada projeto continua usando o **seu
+próprio `.venv`** — a extensão de Python detecta o interpretador de cada pasta
+automaticamente. O VS Code vai sugerir as extensões recomendadas
+(`ms-python.python` e `ms-python.black-formatter`); aceite a instalação.
+
+Testes (pytest) e formatação (black) já vêm configurados no workspace, e o
+`new-poc.sh` registra cada POC nova nele automaticamente.
+
 ## Projetos
 
 | Projeto | O que faz |

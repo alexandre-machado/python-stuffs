@@ -1,9 +1,8 @@
 import trimesh
-import numpy as np
 
 
 # Função auxiliar para criar blocos equivalente ao 'draw_block' do Ruby
-def draw_block(name, x, y, z, width, depth, height):
+def draw_block(name: str, x: float, y: float, z: float, width: float, depth: float, height: float):
     # No trimesh, a caixa é gerada com o centro no ponto (0,0,0).
     # Precisamos deslocá-la para que o canto inferior esquerdo fique em (x, y, z)
     box = trimesh.creation.box(extents=[width, depth, height])

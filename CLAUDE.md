@@ -55,6 +55,17 @@ This copies `template/`, fills in the `{{NAME}}`/`{{DESC}}` placeholders, and ru
 - `uv.lock` is committed; `.venv/` is gitignored. Generated artifacts
   (`beliche.stl`/`beliche.dae`) are gitignored.
 
+## VS Code
+
+Open the **multi-root workspace**, not individual folders:
+`code python-stuffs.code-workspace`. It lists the repo root plus each project as a
+separate folder, so every project keeps its own `.venv` (auto-detected per folder).
+pytest/black settings live in the `.code-workspace` file; `new-poc.sh` appends each
+new project to its `folders` list automatically (via a small inline Python snippet —
+keep the workspace file pure JSON, no comments, so it stays parseable). The root
+`.vscode/settings.json` mirrors the same settings for when the root folder is opened
+directly.
+
 ## Notes
 
 - `projects/3d-mesh-beliche/` is written in **Portuguese** (comments and names like

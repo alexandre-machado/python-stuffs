@@ -1,0 +1,12 @@
+[project]
+name = "asciichart-demo"
+version = "0.1.0"
+description = "Plota um gráfico ASCII de 100 valores aleatórios no terminal"
+requires-python = ">=3.11"
+dependencies = ["asciichartpy"]
+
+[dependency-groups]
+dev = ["pytest"]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]

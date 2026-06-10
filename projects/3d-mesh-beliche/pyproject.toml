@@ -1,0 +1,17 @@
+[project]
+name = "3d-mesh-beliche"
+version = "0.1.0"
+description = "Gera a malha 3D de uma beliche com degraus e exporta para STL/DAE"
+requires-python = ">=3.11"
+dependencies = [
+    "trimesh",
+    "numpy",
+    "pycollada>=0.9.3",
+    "scipy>=1.17.1",
+]
+
+[dependency-groups]
+dev = ["pytest"]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]

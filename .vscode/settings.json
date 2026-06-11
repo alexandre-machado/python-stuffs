@@ -2,8 +2,7 @@
     "[python]": {
         "editor.defaultFormatter": "ms-python.black-formatter"
     },
-    "python.testing.pytestEnabled": true,
+    "python.testing.pytestEnabled": false,
     "python.testing.unittestEnabled": false,
-    "python.testing.pytestArgs": ["tests"],
     "python.analysis.typeCheckingMode": "basic"
 }

@@ -42,13 +42,14 @@ Abra o **workspace** (não a pasta raiz nem cada projeto individualmente):
 code python-stuffs.code-workspace
 ```
 
-Você vê o repo inteiro numa janela só, mas cada projeto continua usando o **seu
-próprio `.venv`** — a extensão de Python detecta o interpretador de cada pasta
-automaticamente. O VS Code vai sugerir as extensões recomendadas
-(`ms-python.python` e `ms-python.black-formatter`); aceite a instalação.
+Você vê o repo inteiro numa janela só, mas cada projeto continua usando o **seu próprio `.venv`** — a extensão de Python detecta o interpretador de cada pasta automaticamente. 
 
-Testes (pytest) e formatação (black) já vêm configurados no workspace, e o
-`new-poc.sh` registra cada POC nova nele automaticamente.
+> [!NOTE]
+> O VS Code não suporta padrões de busca/curinga (como `projects/*`) para incluir pastas automaticamente no arquivo `.code-workspace`. Por isso, o script `new-poc.sh` registra cada POC nova no arquivo automaticamente durante a criação.
+
+### Testes e Formatação
+* **Testes (pytest)**: O painel de testes está configurado no nível do workspace. Para evitar erros de descoberta de testes na raiz do projeto (que não possui ambiente Python próprio nem dependências), a descoberta foi desabilitada especificamente na pasta raiz do repositório em [.vscode/settings.json](file:///home/ubuntu-24/repos/alexandre-machado/python-stuffs/.vscode/settings.json), enquanto continua ativa e funcional para todos os sub-projetos listados no workspace.
+* **Formatação (black)**: Configurada para rodar automaticamente via extensão recomendada.
 
 ## Projetos
 
@@ -68,5 +69,5 @@ Testes (pytest) e formatação (black) já vêm configurados no workspace, e o
 └── projects/         # uma pasta por POC, cada uma com seu próprio ambiente
 ```
 
-> O devcontainer usa Python 3.11. Se for usá-lo, instale o `uv` dentro do container
-> (ver pré-requisito acima); ele não vem na imagem base.
+> O Dev Container está configurado e pronto para uso! Ele utiliza Python 3.11, instala
+> automaticamente o `uv` e pré-configura todas as extensões do VS Code necessárias.

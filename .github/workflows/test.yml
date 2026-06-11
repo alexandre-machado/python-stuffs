@@ -1,0 +1,50 @@
+name: Test Workspaces
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  detect-workspaces:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.set-matrix.outputs.matrix }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Detect workspace folders
+        id: set-matrix
+        run: |
+          # Find all directories under projects/ containing a pyproject.toml file
+          PROJECTS=$(find projects -maxdepth 2 -name pyproject.toml | xargs -I {} dirname {} | jq -R -s -c 'split("\n")[:-1]')
+          echo "Detected projects: $PROJECTS"
+          echo "matrix=$PROJECTS" >> "$GITHUB_OUTPUT"
+
+  test:
+    needs: detect-workspaces
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        workspace: ${{ fromJson(needs.detect-workspaces.outputs.matrix) }}
+      fail-fast: false
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Run tests
+        run: |
+          cd "${{ matrix.workspace }}"
+          uv run pytest

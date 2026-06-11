@@ -1,5 +1,5 @@
 import argparse
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 import mimetypes
 import os
 import re
@@ -139,7 +139,7 @@ def _compute_backoff_seconds(base_seconds: float, attempt: int) -> float:
 
 
 def _seconds_until_next_utc_day(buffer_seconds: float = 5.0) -> float:
-    now_utc = datetime.utcnow()
+    now_utc = datetime.now(UTC)
     next_day_utc = (now_utc + timedelta(days=1)).replace(
         hour=0,
         minute=0,
@@ -229,10 +229,10 @@ def _describe_image(
                 next_day_wait_seconds = _seconds_until_next_utc_day(buffer_seconds=5.0)
                 # Para quota diaria, retryDelay curto nao representa o reset da cota.
                 wait_seconds = max(retry_delay_seconds, next_day_wait_seconds)
-                resume_at = datetime.now() + timedelta(seconds=wait_seconds)
+                resume_at_utc = datetime.now(UTC) + timedelta(seconds=wait_seconds)
                 print(
                     f"Quota diaria esgotada para {img_path.name}; aguardando {wait_seconds:.1f}s "
-                    f"(retoma por volta de {resume_at:%Y-%m-%d %H:%M:%S})"
+                    f"(retoma por volta de {resume_at_utc:%Y-%m-%d %H:%M:%S} UTC)"
                 )
                 time.sleep(wait_seconds)
                 attempt += 1

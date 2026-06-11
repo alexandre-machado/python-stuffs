@@ -209,11 +209,28 @@ def _describe_image_openai(
     import base64
     import json
     import urllib.request
+    from io import BytesIO
 
-    with img_path.open("rb") as file_obj:
-        image_bytes = file_obj.read()
-    img_b64 = base64.b64encode(image_bytes).decode("utf-8")
     mime_type = _mime_type_for_image(img_path)
+
+    if mime_type == "image/webp":
+        try:
+            from PIL import Image
+            with Image.open(img_path) as img:
+                if img.mode in ("RGBA", "LA") or (img.mode == "P" and "transparency" in img.info):
+                    img = img.convert("RGB")
+                buffer = BytesIO()
+                img.save(buffer, format="JPEG")
+                image_bytes = buffer.getvalue()
+                mime_type = "image/jpeg"
+        except ImportError:
+            with img_path.open("rb") as file_obj:
+                image_bytes = file_obj.read()
+    else:
+        with img_path.open("rb") as file_obj:
+            image_bytes = file_obj.read()
+
+    img_b64 = base64.b64encode(image_bytes).decode("utf-8")
 
     url = f"{base_url.rstrip('/')}/chat/completions"
     

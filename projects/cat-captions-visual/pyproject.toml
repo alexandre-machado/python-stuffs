@@ -3,7 +3,10 @@ name = "cat-captions-visual"
 version = "0.1.0"
 description = "descrições visuais das fotos da Duda"
 requires-python = ">=3.11"
-dependencies = ["google-genai"]
+dependencies = [
+    "google-genai",
+    "pillow>=12.2.0",
+]
 
 [dependency-groups]
 dev = ["pytest"]

@@ -7,13 +7,18 @@ import time
 from pathlib import Path
 
 
-PROMPT = (
-    "Descreva esta foto em 2 a 3 frases curtas:\n"
-    "onde a gata esta, o que ela esta fazendo,\n"
-    "qual a expressao ou postura dela,\n"
-    "e se tem outros elementos relevantes no ambiente.\n"
-    "Seja objetivo e direto. Nao comece com 'nesta imagem'."
-)
+PROMPT = """
+Esta foto é da Miau Duda, uma gata Russian Blue / Chartreux cinza.
+Descreva em 1 a 2 frases curtas e diretas:
+
+- onde ela está e o que está fazendo
+- qual o vibe ou expressão dela (entediada, alerta, dramática, confortável, etc.)
+- se tem algo inusitado ou engraçado na cena
+
+Não repita que ela é cinza ou que tem olhos âmbar. 
+Não comece com "A gata" ou "Uma gata".
+Escreva como uma nota rápida de contexto para quem já conhece ela.
+"""
 
 LEGACY_MODEL_ALIASES = {
     "gemini-1.5-flash": "gemini-2.5-flash",
@@ -25,23 +30,32 @@ OUTPUT_HEADER_LINES = ["# Descrições visuais - Miau Duda\n", "Gerado via Gemin
 
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Gera descrições visuais de fotos usando Gemini."
+        description="Gera descrições visuais de fotos usando Gemini ou LM Studio local."
     )
-    parser.add_argument("--media-dir", type=Path, help="Diretorio com imagens .jpg/.webp")
-    parser.add_argument("--output", type=Path, help="Arquivo .md de saida")
+    parser.add_argument("--media-dir", type=Path, help="Diretório com imagens .jpg/.webp")
+    parser.add_argument("--output", type=Path, help="Arquivo .md de saída com as descrições")
     parser.add_argument(
         "--api-key",
-        help="Chave da API Gemini. Se omitido, usa GEMINI_API_KEY do ambiente.",
+        help="Chave da API Gemini (ou token da API local se necessario). Se omitido, usa GEMINI_API_KEY do ambiente.",
     )
     parser.add_argument(
         "--model",
         default="gemini-2.5-flash",
-        help="Modelo Gemini a usar (padrao: gemini-2.5-flash)",
+        help="Modelo a usar (padrao: gemini-2.5-flash ou qwen/qwen3.6-35b-a3b se local/lm-studio)",
     )
     parser.add_argument(
         "--api-version",
         default="v1",
         help="Versao da API Gemini (padrao: v1)",
+    )
+    parser.add_argument(
+        "--base-url",
+        help="URL base da API local / OpenAI-compatible (ex: http://localhost:1234/v1).",
+    )
+    parser.add_argument(
+        "--lm-studio",
+        action="store_true",
+        help="Usa preset do LM Studio local (URL: http://localhost:1234/v1, modelo: qwen/qwen3.6-35b-a3b).",
     )
     parser.add_argument(
         "--max-retries",
@@ -173,16 +187,93 @@ def _parse_existing_output(output: Path) -> tuple[dict[str, str], set[str]]:
     return entries, completed
 
 
-def _build_output_lines(entries: dict[str, str]) -> list[str]:
-    lines = OUTPUT_HEADER_LINES.copy()
+def _build_output_lines(entries: dict[str, str], header_lines: list[str]) -> list[str]:
+    lines = header_lines.copy()
     for file_name, text in entries.items():
         lines.append(f"[{file_name}]\n{text}\n")
     return lines
 
 
-def _write_output(output: Path, entries: dict[str, str]) -> None:
+def _write_output(output: Path, entries: dict[str, str], header_lines: list[str]) -> None:
     output.parent.mkdir(parents=True, exist_ok=True)
-    output.write_text("\n".join(_build_output_lines(entries)), encoding="utf-8")
+    output.write_text("\n".join(_build_output_lines(entries, header_lines)), encoding="utf-8")
+
+
+def _describe_image_openai(
+    base_url: str,
+    model: str,
+    img_path: Path,
+    prompt: str,
+    api_key: str | None = None,
+) -> str:
+    import base64
+    import json
+    import urllib.request
+
+    with img_path.open("rb") as file_obj:
+        image_bytes = file_obj.read()
+    img_b64 = base64.b64encode(image_bytes).decode("utf-8")
+    mime_type = _mime_type_for_image(img_path)
+
+    url = f"{base_url.rstrip('/')}/chat/completions"
+    
+    headers = {
+        "Content-Type": "application/json",
+    }
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
+
+    payload = {
+        "model": model,
+        "messages": [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": prompt},
+                    {
+                        "type": "image_url",
+                        "image_url": {
+                            "url": f"data:{mime_type};base64,{img_b64}"
+                        }
+                    }
+                ]
+            }
+        ],
+        "stream": True,
+    }
+
+    req = urllib.request.Request(
+        url,
+        data=json.dumps(payload).encode("utf-8"),
+        headers=headers,
+        method="POST"
+    )
+
+    full_content = []
+    print("  [Streaming] ", end="", flush=True)
+    # Timeout aumentado para 600 segundos (10 minutos). Lendo a resposta em partes (stream/keep-alive)
+    with urllib.request.urlopen(req, timeout=600) as response:
+        for line in response:
+            line_str = line.decode("utf-8").strip()
+            if not line_str:
+                continue
+            if line_str.startswith("data: "):
+                data_content = line_str[6:]
+                if data_content == "[DONE]":
+                    break
+                try:
+                    chunk = json.loads(data_content)
+                    choices = chunk.get("choices", [])
+                    if choices:
+                        delta = choices[0].get("delta", {})
+                        content = delta.get("content", "")
+                        if content:
+                            full_content.append(content)
+                            print(content, end="", flush=True)
+                except json.JSONDecodeError:
+                    continue
+    print()  # Quebra de linha após o término do stream
+    return "".join(full_content).strip() or "sem resposta do modelo"
 
 
 def _describe_image(
@@ -195,6 +286,8 @@ def _describe_image(
     max_retries: int,
     retry_base_seconds: float,
     continue_on_quota_exhausted: bool,
+    base_url: str | None = None,
+    api_key: str | None = None,
 ) -> tuple[str | None, str | None, bool]:
     with img_path.open("rb") as file_obj:
         image_bytes = file_obj.read()
@@ -203,23 +296,46 @@ def _describe_image(
     attempt = 1
     while True:
         try:
-            response = client.models.generate_content(
-                model=model,
-                contents=[
-                    prompt,
-                    types.Part.from_bytes(
-                        data=image_bytes,
-                        mime_type=_mime_type_for_image(img_path),
-                    ),
-                ],
-            )
-            text = (response.text or "").strip() or "sem resposta do modelo"
-            return text, None, False
+            if base_url:
+                text = _describe_image_openai(
+                    base_url=base_url,
+                    model=model,
+                    img_path=img_path,
+                    prompt=prompt,
+                    api_key=api_key,
+                )
+                return text, None, False
+            else:
+                response = client.models.generate_content(
+                    model=model,
+                    contents=[
+                        prompt,
+                        types.Part.from_bytes(
+                            data=image_bytes,
+                            mime_type=_mime_type_for_image(img_path),
+                        ),
+                    ],
+                )
+                text = (response.text or "").strip() or "sem resposta do modelo"
+                return text, None, False
         except Exception as exc:  # noqa: BLE001 - API pode retornar tipos diferentes
             error_text = str(exc)
+            is_last_attempt = max_attempts is not None and attempt >= max_attempts
+
+            if base_url:
+                if not is_last_attempt:
+                    backoff_seconds = _compute_backoff_seconds(retry_base_seconds, attempt)
+                    print(
+                        f"Erro na conexao local ({error_text}) para {img_path.name}; "
+                        f"aguardando {backoff_seconds:.1f}s e tentando novamente..."
+                    )
+                    time.sleep(backoff_seconds)
+                    attempt += 1
+                    continue
+                return None, error_text, False
+
             is_quota_error = _is_quota_exhausted_error(error_text)
             daily_quota_exhausted = _is_daily_quota_exhausted(error_text)
-            is_last_attempt = max_attempts is not None and attempt >= max_attempts
 
             if daily_quota_exhausted and not is_last_attempt:
                 retry_delay_seconds = _extract_retry_seconds(
@@ -284,27 +400,46 @@ def _describe_image(
 def main(argv: list[str] | None = None) -> int:
     args = _parse_args(argv)
 
-    normalized_model, model_message = _normalize_model_name(args.model)
-    args.model = normalized_model
-    if model_message:
-        print(model_message)
+    is_local = bool(args.base_url or args.lm_studio)
+    if args.lm_studio:
+        if not args.base_url:
+            args.base_url = "http://localhost:1234/v1"
+        if args.model == "gemini-2.5-flash":
+            args.model = "qwen/qwen3.6-35b-a3b"
+    elif args.base_url and args.model == "gemini-2.5-flash":
+        args.model = "qwen/qwen3.6-35b-a3b"
+
+    if not is_local:
+        normalized_model, model_message = _normalize_model_name(args.model)
+        args.model = normalized_model
+        if model_message:
+            print(model_message)
 
     if not args.media_dir or not args.output:
         print("Informe --media-dir e --output para executar a geracao.")
         return 0
 
     api_key = args.api_key or os.environ.get("GEMINI_API_KEY")
-    if not api_key:
-        print("Informe --api-key ou defina GEMINI_API_KEY no ambiente.")
-        return 1
+    client = None
+    types = None
 
-    try:
-        from google import genai
-        from google.genai import types
-    except ImportError:
-        print("Dependencia ausente: google-genai.")
-        print("Instale com: uv add google-genai")
-        return 1
+    if not is_local:
+        if not api_key:
+            print("Informe --api-key ou defina GEMINI_API_KEY no ambiente.")
+            return 1
+
+        try:
+            from google import genai
+            from google.genai import types
+        except ImportError:
+            print("Dependencia ausente: google-genai.")
+            print("Instale com: uv add google-genai")
+            return 1
+
+        client = genai.Client(
+            api_key=api_key,
+            http_options=types.HttpOptions(api_version=args.api_version),
+        )
 
     media_dir = _normalize_cli_path(args.media_dir)
     output = _normalize_cli_path(args.output)
@@ -312,11 +447,6 @@ def main(argv: list[str] | None = None) -> int:
     if not media_dir.exists() or not media_dir.is_dir():
         print(f"Diretorio invalido: {media_dir}")
         return 1
-
-    client = genai.Client(
-        api_key=api_key,
-        http_options=types.HttpOptions(api_version=args.api_version),
-    )
 
     entries, completed = _parse_existing_output(output)
     if completed:
@@ -326,6 +456,12 @@ def main(argv: list[str] | None = None) -> int:
         )
     interrupted = False
 
+    if is_local:
+        header_text = f"Gerado via {args.model} (LM Studio Local)\n"
+    else:
+        header_text = "Gerado via Gemini\n"
+    header_lines = ["# Descrições visuais - Miau Duda\n", header_text, "---\n"]
+
     try:
         try:
             for img_path in _iter_images(media_dir):
@@ -333,6 +469,7 @@ def main(argv: list[str] | None = None) -> int:
                     print(f"SKIP {img_path.name} (ja concluido no output)")
                     continue
 
+                print(f"Processando {img_path.name}...")
                 text, error_text, abort_batch = _describe_image(
                     client=client,
                     types=types,
@@ -342,18 +479,20 @@ def main(argv: list[str] | None = None) -> int:
                     max_retries=args.max_retries,
                     retry_base_seconds=args.retry_base_seconds,
                     continue_on_quota_exhausted=args.continue_on_quota_exhausted,
+                    base_url=args.base_url,
+                    api_key=api_key,
                 )
 
                 if text is not None:
                     entries[img_path.name] = text
                     completed.add(img_path.name)
-                    _write_output(output, entries)
+                    _write_output(output, entries, header_lines)
                     print(f"OK {img_path.name}")
                     continue
 
                 print(f"ERRO {img_path.name}: {error_text}")
                 entries[img_path.name] = f"erro: {error_text}"
-                _write_output(output, entries)
+                _write_output(output, entries, header_lines)
 
                 if abort_batch:
                     print(
@@ -365,10 +504,11 @@ def main(argv: list[str] | None = None) -> int:
             interrupted = True
             print("Interrompido pelo usuario (Ctrl+C). Salvando resultado parcial...")
 
-        _write_output(output, entries)
+        _write_output(output, entries, header_lines)
         print(f"Salvo em {output}")
     finally:
-        client.close()
+        if client is not None:
+            client.close()
 
     return 130 if interrupted else 0
 

@@ -59,6 +59,7 @@ Você vê o repo inteiro numa janela só, mas cada projeto continua usando o **s
 | `network-scanner` | Varre `192.168.0.0/24` procurando hosts com a porta 554 (RTSP) aberta. |
 | `multiprocessing-examples` | Exemplos de `multiprocessing.Pool` (`imap`/`apply_async`) com `tqdm`. |
 | `3d-mesh-beliche` | Gera a malha 3D de uma beliche e exporta para STL/DAE (código em PT). |
+| `cat-captions-visual` | Gera descrições visuais de fotos usando a API do Gemini ou LM Studio local. |
 
 ## Estrutura
 

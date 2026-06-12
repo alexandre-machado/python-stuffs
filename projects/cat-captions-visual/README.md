@@ -91,3 +91,8 @@ uv add --dev <pacote>  # adiciona dependência de desenvolvimento
 ```bash
 uv run pytest
 ```
+
+## Contribuição
+
+- As descrições de Pull Requests (PRs) e as mensagens de commit devem ser escritas obrigatoriamente em **inglês**.
+

@@ -1,8 +1,12 @@
 import argparse
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import UTC, datetime, timedelta
 import mimetypes
 import os
 import re
+import shutil
+import sys
+import threading
 import time
 from pathlib import Path
 
@@ -26,6 +30,150 @@ LEGACY_MODEL_ALIASES = {
 }
 
 OUTPUT_HEADER_LINES = ["# Descrições visuais - Miau Duda\n", "Gerado via Gemini\n", "---\n"]
+
+
+class ConsoleProgressBar:
+    def __init__(self, total: int, completed_start: int):
+        self.total = total
+        self.completed = completed_start
+        self.processed_this_session = 0
+        self.start_time = time.time()
+        self.current_files = set()
+        self.active = False
+        self.thread = None
+        self.lock = threading.Lock()
+        self.spinner_chars = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏']
+        self.spinner_idx = 0
+        self.lines_drawn = 0
+        self.is_tty = sys.stdout.isatty()
+        self.speed_str = "-- img/s"
+        self.eta_datetime = None
+
+    def start_image(self, file_name: str):
+        with self.lock:
+            self.current_files.add(file_name)
+            self.active = True
+            if self.is_tty:
+                if self.thread is None or not self.thread.is_alive():
+                    self.thread = threading.Thread(target=self._run, daemon=True)
+                    self.thread.start()
+            else:
+                print(f"Processando {file_name}...")
+
+    def finish_image(self, file_name: str, success: bool):
+        with self.lock:
+            self.current_files.discard(file_name)
+            if not self.current_files:
+                self.active = False
+        
+        if self.thread and not self.active:
+            self.thread.join(timeout=0.5)
+        
+        if self.is_tty:
+            self._clear_lines()
+            
+        with self.lock:
+            if success:
+                self.completed += 1
+            self.processed_this_session += 1
+            
+            # Atualiza velocidade e ETA no fim de cada imagem processada
+            elapsed = time.time() - self.start_time
+            if self.processed_this_session > 0 and elapsed > 0:
+                speed = self.processed_this_session / elapsed
+                if speed >= 1.0:
+                    self.speed_str = f"{speed:.2f} img/s"
+                else:
+                    self.speed_str = f"{1.0 / speed:.2f} s/img"
+                
+                remaining = self.total - self.completed
+                if remaining > 0:
+                    eta_seconds = remaining / speed
+                    self.eta_datetime = datetime.now() + timedelta(seconds=eta_seconds)
+                else:
+                    self.eta_datetime = None
+
+    def print_log(self, message: str):
+        """Imprime mensagens de log (como retentativas) sem bagunçar a barra."""
+        with self.lock:
+            if self.is_tty:
+                self._clear_lines()
+            print(message)
+            if self.is_tty:
+                self._draw_lines()
+
+    def _clear_lines(self):
+        if self.lines_drawn > 0:
+            sys.stdout.write(f"\033[{self.lines_drawn}A\r")
+            for _ in range(self.lines_drawn):
+                sys.stdout.write("\033[K\n")
+            sys.stdout.write(f"\033[{self.lines_drawn}A\r")
+            sys.stdout.flush()
+            self.lines_drawn = 0
+
+    def _draw_lines(self):
+        if not self.active or not self.current_files:
+            return
+
+        # Determinamos o caractere do spinner atual
+        spinner = self.spinner_chars[self.spinner_idx]
+        self.spinner_idx = (self.spinner_idx + 1) % len(self.spinner_chars)
+        
+        # Geramos uma linha de processamento para cada imagem ativa
+        files_list = sorted(list(self.current_files))
+        lines = []
+        for file_name in files_list:
+            lines.append(f"{spinner} Processando {file_name}")
+
+        percent = (self.completed / self.total) * 100 if self.total > 0 else 0
+        
+        # Calcular o ETA regressivo na tela
+        if self.eta_datetime is not None:
+            remaining_sec = (self.eta_datetime - datetime.now()).total_seconds()
+            if remaining_sec > 0:
+                if remaining_sec < 3600:
+                    eta_str = f"ETA: {int(remaining_sec // 60):02d}:{int(remaining_sec % 60):02d}"
+                else:
+                    hours = int(remaining_sec // 3600)
+                    mins = int((remaining_sec % 3600) // 60)
+                    secs = int(remaining_sec % 60)
+                    eta_str = f"ETA: {hours:02d}:{mins:02d}:{secs:02d}"
+            else:
+                eta_str = "ETA: 00:00"
+            eta_str += f" ({self.eta_datetime.strftime('%H:%M:%S')})"
+        else:
+            eta_str = "ETA: --"
+
+        bar_width = 20
+        filled = int(bar_width * (self.completed / self.total)) if self.total > 0 else 0
+        bar = "█" * filled + "░" * (bar_width - filled)
+
+        # Adiciona a última linha (a barra de progresso)
+        lines.append(f"[{bar}] {percent:.1f}% ({self.completed}/{self.total}) | {self.speed_str} | {eta_str}")
+
+        if self.lines_drawn > 0:
+            sys.stdout.write(f"\033[{self.lines_drawn}A\r")
+
+        for line in lines:
+            sys.stdout.write(line + "\033[K\n")
+        sys.stdout.flush()
+        self.lines_drawn = len(lines)
+
+    def _run(self):
+        while True:
+            with self.lock:
+                if not self.active:
+                    break
+                self._draw_lines()
+            time.sleep(0.1)
+
+    def stop(self):
+        with self.lock:
+            self.active = False
+        if self.thread:
+            self.thread.join(timeout=0.5)
+        if self.is_tty:
+            self._clear_lines()
 
 
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -79,6 +227,12 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             "Continua processando arquivos mesmo quando detectar quota diaria esgotada. "
             "Por padrao o lote e interrompido nesse caso."
         ),
+    )
+    parser.add_argument(
+        "--parallel",
+        type=int,
+        default=2,
+        help="Quantidade de imagens a processar em paralelo (padrao: 2)",
     )
     return parser.parse_args(argv)
 
@@ -267,7 +421,6 @@ def _describe_image_openai(
     )
 
     full_content = []
-    print("  [Streaming] ", end="", flush=True)
     # Timeout aumentado para 600 segundos (10 minutos). Lendo a resposta em partes (stream/keep-alive)
     with urllib.request.urlopen(req, timeout=600) as response:
         for line in response:
@@ -286,10 +439,8 @@ def _describe_image_openai(
                         content = delta.get("content", "")
                         if content:
                             full_content.append(content)
-                            print(content, end="", flush=True)
                 except json.JSONDecodeError:
                     continue
-    print()  # Quebra de linha após o término do stream
     return "".join(full_content).strip() or "sem resposta do modelo"
 
 
@@ -305,6 +456,7 @@ def _describe_image(
     continue_on_quota_exhausted: bool,
     base_url: str | None = None,
     api_key: str | None = None,
+    print_func=print,
 ) -> tuple[str | None, str | None, bool]:
     with img_path.open("rb") as file_obj:
         image_bytes = file_obj.read()
@@ -342,7 +494,7 @@ def _describe_image(
             if base_url:
                 if not is_last_attempt:
                     backoff_seconds = _compute_backoff_seconds(retry_base_seconds, attempt)
-                    print(
+                    print_func(
                         f"Erro na conexao local ({error_text}) para {img_path.name}; "
                         f"aguardando {backoff_seconds:.1f}s e tentando novamente..."
                     )
@@ -363,7 +515,7 @@ def _describe_image(
                 # Para quota diaria, retryDelay curto nao representa o reset da cota.
                 wait_seconds = max(retry_delay_seconds, next_day_wait_seconds)
                 resume_at_utc = datetime.now(UTC) + timedelta(seconds=wait_seconds)
-                print(
+                print_func(
                     f"Quota diaria esgotada para {img_path.name}; aguardando {wait_seconds:.1f}s "
                     f"(retoma por volta de {resume_at_utc:%Y-%m-%d %H:%M:%S} UTC)"
                 )
@@ -381,7 +533,7 @@ def _describe_image(
                     error_text,
                     fallback_seconds=backoff_seconds,
                 )
-                print(
+                print_func(
                     f"Quota/limite para {img_path.name}; aguardando {wait_seconds:.1f}s "
                     f"(tentativa {attempt}{'' if max_attempts is None else f'/{max_attempts}'})"
                 )
@@ -395,7 +547,7 @@ def _describe_image(
                     error_text,
                     fallback_seconds=backoff_seconds,
                 )
-                print(
+                print_func(
                     f"Servico temporariamente indisponivel para {img_path.name}; "
                     f"aguardando {wait_seconds:.1f}s "
                     f"(tentativa {attempt}{'' if max_attempts is None else f'/{max_attempts}'})"
@@ -473,57 +625,103 @@ def main(argv: list[str] | None = None) -> int:
         )
     interrupted = False
 
+    all_images = _iter_images(media_dir)
+    progress_bar = ConsoleProgressBar(total=len(all_images), completed_start=len(completed))
+
     if is_local:
         header_text = f"Gerado via {args.model} (LM Studio Local)\n"
     else:
         header_text = "Gerado via Gemini\n"
     header_lines = ["# Descrições visuais - Miau Duda\n", header_text, "---\n"]
 
-    try:
+    write_lock = threading.Lock()
+    abort_all = False
+    futures = {}
+
+    def process_one_image(img_path):
+        nonlocal abort_all
+        if abort_all:
+            return
+
+        progress_bar.start_image(img_path.name)
         try:
-            for img_path in _iter_images(media_dir):
-                if img_path.name in completed:
-                    print(f"SKIP {img_path.name} (ja concluido no output)")
-                    continue
+            text, error_text, abort_batch = _describe_image(
+                client=client,
+                types=types,
+                model=args.model,
+                img_path=img_path,
+                prompt=PROMPT,
+                max_retries=args.max_retries,
+                retry_base_seconds=args.retry_base_seconds,
+                continue_on_quota_exhausted=args.continue_on_quota_exhausted,
+                base_url=args.base_url,
+                api_key=api_key,
+                print_func=progress_bar.print_log,
+            )
+        except Exception as e:
+            text, error_text, abort_batch = None, str(e), False
 
-                print(f"Processando {img_path.name}...")
-                text, error_text, abort_batch = _describe_image(
-                    client=client,
-                    types=types,
-                    model=args.model,
-                    img_path=img_path,
-                    prompt=PROMPT,
-                    max_retries=args.max_retries,
-                    retry_base_seconds=args.retry_base_seconds,
-                    continue_on_quota_exhausted=args.continue_on_quota_exhausted,
-                    base_url=args.base_url,
-                    api_key=api_key,
-                )
+        with write_lock:
+            if abort_all:
+                progress_bar.finish_image(img_path.name, success=False)
+                return
 
-                if text is not None:
-                    entries[img_path.name] = text
-                    completed.add(img_path.name)
-                    _write_output(output, entries, header_lines)
-                    print(f"OK {img_path.name}")
-                    continue
-
+            if text is not None:
+                text = " ".join(text.replace("\n", " ").replace("\r", " ").split())
+                entries[img_path.name] = text
+                completed.add(img_path.name)
+                _write_output(output, entries, header_lines)
+                progress_bar.finish_image(img_path.name, success=True)
+                
+                columns = shutil.get_terminal_size().columns
+                prefix = f"OK {img_path.name} ["
+                suffix = "]"
+                max_text_len = columns - len(prefix) - len(suffix)
+                if len(text) > max_text_len and max_text_len > 3:
+                    display_text = text[:max_text_len - 3] + "..."
+                else:
+                    display_text = text
+                print(f"{prefix}{display_text}{suffix}")
+            else:
+                progress_bar.finish_image(img_path.name, success=False)
                 print(f"ERRO {img_path.name}: {error_text}")
                 entries[img_path.name] = f"erro: {error_text}"
                 _write_output(output, entries, header_lines)
 
-                if abort_batch:
-                    print(
-                        "Quota diaria esgotada detectada; interrompendo o lote. "
-                        "Use --continue-on-quota-exhausted para forcar continuidade."
-                    )
-                    break
+            if abort_batch:
+                abort_all = True
+
+    try:
+        try:
+            images_to_process = [img for img in all_images if img.name not in completed]
+            for img in all_images:
+                if img.name in completed:
+                    print(f"SKIP {img.name} (ja concluido no output)")
+
+            if images_to_process:
+                with ThreadPoolExecutor(max_workers=args.parallel) as executor:
+                    futures = {executor.submit(process_one_image, img): img for img in images_to_process}
+                    for future in as_completed(futures):
+                        if abort_all:
+                            for f in futures:
+                                f.cancel()
+                        future.result()
         except KeyboardInterrupt:
             interrupted = True
-            print("Interrompido pelo usuario (Ctrl+C). Salvando resultado parcial...")
+            active_files = list(progress_bar.current_files)
+            progress_bar.stop()
+            for file_name in sorted(active_files):
+                print(f"CANCELED {file_name}")
+            for f in futures:
+                f.cancel()
+            _write_output(output, entries, header_lines)
+            os._exit(130)
 
+        progress_bar.stop()
         _write_output(output, entries, header_lines)
         print(f"Salvo em {output}")
     finally:
+        progress_bar.stop()
         if client is not None:
             client.close()
 
